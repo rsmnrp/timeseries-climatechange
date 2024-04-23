@@ -1,0 +1,406 @@
+---
+title: "TS Final Project"
+output: html_document
+date: "2024-04-03"
+---
+# Read data, convert to ts
+```{r}
+library(fpp2)
+library(TSstudio)
+library(forecast)
+library(dplyr)
+
+data <- read.csv("Combined Data Final.csv")
+View(data)
+
+# Individual TS
+ghg_ts = ts(data = data['ghg.emission'], start = 1880, frequency = 1)
+autoplot(ghg_ts)
+
+temp_ts = ts(data = data['temp.anomalies'], start = 1880, frequency = 1)
+temp_ts = tanh(temp_ts) 
+autoplot(temp_ts)
+
+msl_ts = ts(data = data['mean.sea.level'], start = 1880, frequency = 1)
+msl_ts = msl_ts + 200 
+autoplot(msl_ts)
+
+# GHG vs TEMP
+ghgtemp <- data[, c("ghg.emission", "temp.anomalies")]
+ghgtemp_ts = ts(data = ghgtemp)
+
+# GHG vs MSL
+ghgmsl <- data[, c("ghg.emission", "mean.sea.level")]
+ghgmsl_ts = ts(data = ghgmsl)
+
+#TEMP vs MSL
+tempmsl <- data[, c("mean.sea.level", "temp.anomalies")]
+tempmsl_ts = ts(data = tempmsl)
+
+# Whole TS
+data_ts = ts(data, start = 1880, frequency = 1)
+View(data_ts)
+```
+
+# ACF, PACF
+```{r}
+ggAcf(diff(ghg_ts)) # MA = 3, 4
+ggAcf(diff(temp_ts)) # MA = 1, 2, 4
+ggAcf(diff(msl_ts)) # MA = 1, 2
+
+ggPacf(ghg_ts) # AR = 0, 1
+ggPacf(temp_ts) # AR = 1, 3
+ggPacf(msl_ts) #AR = 0
+
+```
+
+# Select diffs
+```{r}
+ndiffs(ghg_ts) # 2
+ndiffs(temp_ts) # 1
+ndiffs(msl_ts) # 1
+```
+
+# Test for stationarity
+```{r}
+library(urca)
+
+diff_ghg = diff(diff(ghg_ts))
+diff_temp = diff(temp_ts)
+diff_msl = diff(msl_ts)
+
+ur.kpss(diff_ghg)
+# Since p-value = 0.1383 > 0.05, the null hypothesis is retained and the data is stationary
+
+ur.kpss(diff_temp)
+# Since p-value = 0.1664 > 0.05, the null hypothesis is retained and the data is stationary
+
+ur.kpss(diff_msl)
+# Since p-value = 0.4139 > 0.05, the null hypothesis is retained and the data is stationary
+```
+
+###### GHG
+```{r}
+# Manual Arima: GHG (1, 2, 4) MAPE: 3.222849 / AICc = 5998.29
+model_ghg = Arima(ghg_ts, order = c(1, 2, 4), include.constant = TRUE, include.drift = TRUE)
+summary(model_ghg)
+
+autoplot(forecast(model_ghg))
+
+checkresiduals(model_ghg)
+
+outofsampleperiod = 80
+
+ghg_split = ts_split(ghg_ts, sample.out = 80)
+
+accuracy(x = ghg_split$test[,1:1], forecast(Arima(ghg_split$train[,1:1], order = c(1, 2, 4), include.constant = TRUE)))
+
+# BEST Manual Arima: GHG (2, 2, 4) MAPE: 3.395982 / AICc = 5998.53
+model2_ghg = Arima(ghg_ts, order = c(2, 2, 4), include.constant = TRUE)
+summary(model2_ghg)
+autoplot(forecast(model2_ghg))
+
+checkresiduals(model2_ghg)
+
+outofsampleperiod = 80
+
+ghg_split = ts_split(ghg_ts, sample.out = 80)
+
+accuracy(x = ghg_split$test[,1:1], forecast(Arima(ghg_split$train[,1:1], order = c(2, 2, 1), include.constant = TRUE)))
+
+
+# Manual Arima: GHG (0, 2, 4) MAPE: 3.220900 / AICc = 5997.29 (LOWEST AIC & MAPE)
+model3_ghg = Arima(ghg_ts, order = c(0, 2, 4), include.constant = TRUE, include.drift = TRUE)
+summary(model3_ghg)
+autoplot(forecast(model3_ghg))
+
+checkresiduals(model3_ghg)
+
+outofsampleperiod = 80
+
+ghg_split = ts_split(ghg_ts, sample.out = 80)
+
+accuracy(x = ghg_split$test[,1:1], forecast(Arima(ghg_split$train[,1:1], order = c(0, 2, 4), include.constant = TRUE)))
+
+# auto.arima MAPE: 2.874838 / AICc = -129.11
+model_ghg2 = auto.arima(ghg_ts1, lambda = "auto")
+summary(model_ghg2)
+autoplot(forecast(model_ghg2)) # (0, 1, 0)
+
+checkresiduals(model_ghg2)
+
+outofsampleperiod = 80
+
+ghg_split = ts_split(ghg_ts, sample.out = 80)
+
+accuracy(x = ghg_split$test[,1:1], forecast(auto.arima(ghg_split$train[,1:1]))) 
+
+
+# LOWER MAPE / AIC than BEST manual arima
+
+# Thus, best ARIMA model for GHG is (0, 1, 0)
+```
+
+
+# TEMP ANOMALIES
+```{r}
+# Manual Arima: TEMP (3, 1, 4) MAPE: 179.9973 / AICc = -257.59
+model_temp = Arima(temp_ts, order = c(3, 1, 4), include.constant = TRUE)
+summary(model_temp)
+autoplot(forecast(model_temp))
+
+checkresiduals(model_temp)
+
+outofsampleperiod = 80
+
+temp_split = ts_split(temp_ts, sample.out = 80)
+
+accuracy(x = temp_split$test[,1:1], forecast(Arima(temp_split$train[,1:1], order = c(3, 1, 4), include.constant = TRUE)))
+
+# BEST Manual Arima: TEMP (1, 1, 2) # MAPE : 106.8269 / AICc = -258.8 (Lowest AIC)
+model2_temp = Arima(temp_ts, order = c(1, 1, 2), include.constant = TRUE)
+summary(model2_temp)
+autoplot(forecast(model2_temp))
+
+checkresiduals(model2_temp)
+
+outofsampleperiod = 80
+
+temp_split = ts_split(temp_ts, sample.out = 80)
+
+accuracy(x = temp_split$test[,1:1], forecast(Arima(temp_split$train[,1:1], order = c(1, 1, 2), include.constant = TRUE)))
+
+# Manual Arima: TEMP (2, 1, 4) MAPE: 155.6419 / AICc = -237.31
+model3_temp = Arima(temp_ts, order = c(2, 1, 4), include.constant = TRUE)
+summary(model3_temp)
+autoplot(forecast(model3_temp))
+
+checkresiduals(model3_temp)
+
+outofsampleperiod = 80
+
+temp_split = ts_split(temp_ts, sample.out = 80)
+
+accuracy(x = temp_split$test[,1:1], forecast(Arima(temp_split$train[,1:1], order = c(2, 1, 4), include.constant = TRUE)))
+
+# auto.arima AICc = -385.48 / MAPE: 96.09611
+model_temp2 = auto.arima(temp_ts, lambda = "auto")
+summary(model_temp2)
+autoplot(forecast(model_temp2)) # (0, 1, 2)
+
+checkresiduals(model_temp2)
+
+outofsampleperiod = 80
+
+temp_split = ts_split(temp_ts, sample.out = 80)
+
+accuracy(x = temp_split$test[,1:1], forecast(auto.arima(temp_split$train[,1:1]))) 
+# Lower RMSE /  MAPE than manual ARIMA
+# Thus, best arima model for TEMP ANOMALIES is (0, 1, 2)
+```
+
+
+# MEAN SEA LEVEL
+```{r}
+# auto.arima
+model_msl = auto.arima(msl_ts, lambda = "auto")
+summary(model_msl)
+autoplot(forecast(model_msl)) # (0,1,2)
+
+checkresiduals(model_temp2)
+
+outofsampleperiod = 80
+
+msl_split = ts_split(msl_ts, sample.out = 80)
+
+accuracy(x = msl_split$test[,1:1], forecast(auto.arima(msl_split$train[,1:1])))
+```
+
+# ARIMA-X
+```{r}
+# GHG and TEMP
+temp_ghg = auto.arima(data[,'temp.anomalies' ], xreg=data[,"ghg.emission"], lambda = "auto")
+summary(temp_ghg) # (0, 0, 0)
+autoplot(forecast(temp_ghg, xreg = data[,"ghg.emission"]))
+
+tempp_ghg = Arima(data[,'temp.anomalies'], order = c(1, 2, 2), xreg=data[,"ghg.emission"], lambda = "auto")
+summary(tempp_ghg) 
+autoplot(forecast(tempp_ghg, xreg = data[,"ghg.emission"]))
+
+
+msl_temp = auto.arima(data[,"mean.sea.level"], xreg=data[,"temp.anomalies"], lambda = "auto")
+summary(msl_temp) # (0, 1, 1)
+autoplot(forecast(msl_temp, xreg = data[,"temp.anomalies"]))
+
+msl_ghg = auto.arima(data[,"mean.sea.level"], xreg=data[,"ghg.emission"], lambda = "auto")
+summary(msl_ghg) # (0, 0, 0)
+autoplot(forecast(msl_ghg, xreg = data[,"ghg.emission"]))
+
+
+msll_ghg = Arima(data[,"mean.sea.level"], order = c(1,2,2), xreg=data[,"ghg.emission"], lambda = "auto")
+summary(msll_ghg)
+autoplot(forecast(msll_ghg, xreg = data[,"ghg.emission"]))
+
+
+checkresiduals(temp_ghg)
+
+outofsampleperiod = 80
+
+ghgtemp_split = ts_split(ghgtemp_ts, sample.out = 80)
+
+accuracy(x = ghgtemp_split$test[,1:1], forecast(auto.arima(ghgtemp_split$train[,1:1])))
+```
+
+
+# ARIMA-X Across 3 variables
+```{r}
+# Mean sea level as y variable
+## delete this? model1 = auto.arima(msl_ts, xreg = cbind(ghg_ts, temp_ts))
+
+model1 = auto.arima(data['mean.sea.level'], xreg = as.matrix(cbind(data['ghg.emission'], data['temp.anomalies'])))
+summary(model1) 
+tsdisplay(residuals(model1, type="regression"))
+tsdisplay(residuals(model1, type="innovation"))
+checkresiduals(model1)
+
+autoplot(forecast(model1, xreg = as.matrix(cbind(data['ghg.emission'], data['temp.anomalies']))))
+
+
+# Temperature Anomalies as y variable
+##model2 = auto.arima(temp_ts, xreg = cbind(ghg_ts, msl_ts))
+
+model2 = auto.arima(data['temp.anomalies'], xreg = as.matrix(cbind(data['ghg.emission'], data['mean.sea.level'])))
+summary(model2)
+tsdisplay(residuals(model2, type="regression"))
+tsdisplay(residuals(model2, type="innovation"))
+checkresiduals(model2)
+
+autoplot(forecast(model2,  xreg = as.matrix(cbind(data['ghg.emission'], data['mean.sea.level'])), h=80))
+
+#cannot run: GHG as y variable
+##model3 = auto.arima(ghg_ts, xreg = cbind(temp_ts, msl_ts))
+
+model3 = auto.arima(data['ghg.emission'], xreg = as.matrix(cbind(data['temp.anomalies'], data['mean.sea.level'])))
+summary(model3)
+tsdisplay(residuals(model3, type="regression"))
+tsdisplay(residuals(model3, type="innovation"))
+checkresiduals(model3)
+
+autoplot(forecast(model3, xreg = as.matrix(cbind(data['temp.anomalies'], data['mean.sea.level'])), h = 80))
+```
+
+# VAR - temp and mean sea level
+```{r}
+library(urca)
+library(vars)
+
+# GHG vs TEMP
+ghgtemp <- data[, c("ghg.emission", "temp.anomalies")]
+ghgtemp_ts = ts(data = ghgtemp)
+
+# GHG vs MSL
+ghgmsl <- data[, c("ghg.emission", "mean.sea.level")]
+ghgmsl_ts = ts(data = ghgmsl)
+
+#TEMP vs MSL
+tempmsl <- data[, c("mean.sea.level", "temp.anomalies")]
+tempmsl_ts = ts(data = tempmsl)
+
+summary(ca.jo(tempmsl))
+# r = 0, no cointegration relationship between the variables,  thus we need to build a VAR on the differenced variables(?)
+
+VARselect(tempmsl)
+
+# Choosing the lag order
+
+var_model1 <- VAR(tempmsl_ts, p = 1, type = "const")
+# results of the VAR model show that the mean sea level and temperature anomalies series are correlated to each other.
+
+serial.test(var_model1, lags.pt = 10, type = "PT.asymptotic")
+# based on serial.test, there is positive correlation between the two models, as the temperature anomalies increase, the mean sea level also tends to increase.
+
+var_model2 <- VAR(tempmsl_ts, p = 2, type = "const")
+serial.test(var_model2, lags.pt = 10, type = "PT.asymptotic")
+
+var_model3 <- VAR(tempmsl_ts, p = 3, type = "const")
+serial.test(var_model3, lags.pt = 10, type = "PT.asymptotic")
+
+var_model4 <- VAR(tempmsl_ts, p = 4, type = "const")
+serial.test(var_model4, lags.pt = 10, type = "PT.asymptotic")
+
+varmodel5 <- VAR(tempmsl_ts, p = 5, type = "const") 
+serial.test(varmodel5, lags.pt = 10, type = "PT.asymptotic") # Choose this since it has highest p-value, residuals do not contain serial correlation
+
+varmodel6 <- VAR(tempmsl_ts, p = 6, type = "const")
+serial.test(varmodel6, lags.pt = 10, type = "PT.asymptotic")
+
+varmodel7 <- VAR(tempmsl_ts, p = 7, type = "const")
+serial.test(varmodel7, lags.pt = 10, type = "PT.asymptotic")
+
+varmodel8 <- VAR(tempmsl_ts, p = 8, type = "const")
+serial.test(varmodel8, lags.pt = 10, type = "PT.asymptotic")
+
+varmodel9 <- VAR(tempmsl_ts, p = 9, type = "const")
+serial.test(varmodel9, lags.pt = 10, type = "PT.asymptotic")
+
+varmodel10 <- VAR(tempmsl_ts, p = 10, type = "const")
+serial.test(varmodel10, lags.pt = 10, type = "PT.asymptotic")
+
+autoplot(forecast(varmodel5, h = 80))
+
+AIC(varmodel5) 
+```
+
+
+# VECM
+```{r}
+library(urca)
+library(tsDyn)
+library(ggplot2)
+
+# determine no. of cointegration rs between temp anomalies and mean sea level
+summary(ca.jo(tempmsl))
+
+#build VECM
+VARselect(tempmsl)
+
+var_model1 <- VAR(tempmsl, p = 1, type = "const")
+# results of the VAR model show that the mean sea level and temperature anomalies series are correlated to each other.
+serial.test(var_model1, lags.pt = 10, type = "PT.asymptotic")
+# based on serial.test, there is positive correlation between the two models, as the temperature anomalies increase, the mean sea level also tends to increase.
+
+var_model2 <- VAR(tempmsl, p = 2, type = "const")
+serial.test(var_model2, lags.pt = 10, type = "PT.asymptotic")
+
+var_model3 <- VAR(tempmsl, p = 3, type = "const")
+serial.test(var_model3, lags.pt = 10, type = "PT.asymptotic")
+
+var_model4 <- VAR(tempmsl, p = 4, type = "const")
+serial.test(var_model4, lags.pt = 10, type = "PT.asymptotic")
+
+var_model5 <- VAR(tempmsl, p = 5, type = "const")
+serial.test(var_model5, lags.pt = 10, type = "PT.asymptotic")
+
+# autoplot(ts(tempmsl[[1]])) + autolayer(ts(tempmsl[[2]])) 
+tempmsl_scaled <- scale(tempmsl)
+scaled_tempmsl_ts <- ts(tempmsl_scaled[, 1], start = 1, frequency = 1)
+# Plot scaled temperature anomalies and sea level together
+autoplot(scaled_tempmsl_ts) + autolayer(ts(tempmsl_scaled[, 2]))
+
+vecmmodel = VECM(tempmsl, lag=1, r =1, estim = "ML")
+vecmmodel
+predict(vecmmodel, n.ahead = 80)
+grangertest(tempmsl_ts, order=1)
+# we reject the null hypothesis and conclude that there is evidence of Granger causality from mean sea level to temperature anomalies. changes in mean sea level can help predict changes in temperature anomalies.
+
+residuals <- resid(vecmmodel)
+
+# perform ljung-box test on each variable separately
+Box.test(residuals[,1], lag = 1, type = "Ljung") # mean sea level
+
+Box.test(residuals[,2], lag = 1, type = "Ljung") # temp anomalies
+
+# no significant autocorrelation in the residuals of the VECM model for the mean sea level series, but there is some evidence of autocorrelation in the residuals for the temperature anomalies series, this suggests that there may be some additional factors that are affecting the temperature anomalies series that are not accounted for in the VECM model.
+```
+
+
